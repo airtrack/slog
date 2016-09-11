@@ -10,7 +10,7 @@
 
 #include <string>
 #include <vector>
-#include <queue>
+#include <deque>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -150,10 +150,25 @@ public:
     ArgFormatter(const ArgFormatter &) = delete;
     void operator = (const ArgFormatter &) = delete;
 
+    void AppendChar(int c)
+    {
+        ReserveBuf(1);
+        *Current() = c;
+        ConsumeBuf(1);
+    }
+
     void Append(const char *buf, std::size_t size)
     {
         ReserveBuf(size);
         memcpy(Current(), buf, size);
+        ConsumeBuf(size);
+    }
+
+    template<typename T>
+    void Snprintf(const char *fmt, T t, std::size_t reserve)
+    {
+        ReserveBuf(reserve);
+        auto size = snprintf(Current(), reserve, fmt, t);
         ConsumeBuf(size);
     }
 
@@ -180,35 +195,35 @@ private:
 #define ARG_FORMATTER(type, fmt, buf_size) \
     inline ArgFormatter & operator << (ArgFormatter &f, type t) \
     { \
-        char buf[buf_size] = { 0 }; \
-        auto size = snprintf(buf, sizeof(buf), fmt, t); \
-        f.Append(buf, size); \
+        f.Snprintf(fmt, t, buf_size); \
         return f; \
     }
 
-ARG_FORMATTER(short, "%hd", 8)
-ARG_FORMATTER(unsigned short, "%hu", 8)
-ARG_FORMATTER(int, "%d", 12)
-ARG_FORMATTER(unsigned int, "%u", 12)
-ARG_FORMATTER(long, "%ld", 24)
-ARG_FORMATTER(unsigned long, "%ld", 24)
-ARG_FORMATTER(long long, "%lld", 24)
-ARG_FORMATTER(unsigned long long, "%llu", 24)
+ARG_FORMATTER(short, "%hd", 6)
+ARG_FORMATTER(unsigned short, "%hu", 5)
+ARG_FORMATTER(int, "%d", 11)
+ARG_FORMATTER(unsigned int, "%u", 10)
+ARG_FORMATTER(long, "%ld", 21)
+ARG_FORMATTER(unsigned long, "%ld", 20)
+ARG_FORMATTER(long long, "%lld", 21)
+ARG_FORMATTER(unsigned long long, "%llu", 20)
 
 inline ArgFormatter & operator << (ArgFormatter &f, char c)
 {
-    f.Append(&c, sizeof(c));
+    f.AppendChar(c);
     return f;
 }
 
 inline ArgFormatter & operator << (ArgFormatter &f, signed char c)
 {
-    return (f << static_cast<char>(c));
+    f.AppendChar(c);
+    return f;
 }
 
 inline ArgFormatter & operator << (ArgFormatter &f, unsigned char c)
 {
-    return (f << static_cast<char>(c));
+    f.AppendChar(c);
+    return f;
 }
 
 inline ArgFormatter & operator << (ArgFormatter &f, const char *s)
@@ -262,9 +277,7 @@ inline Hex2<IntType> HEX(IntType v)
 #define ARG_HEX_FORMATTER(func_name, type, fmt, buf_size) \
     inline ArgFormatter & func_name(ArgFormatter &f, type t) \
     { \
-        char buf[buf_size] = { 0 }; \
-        auto size = snprintf(buf, sizeof(buf), fmt, t); \
-        f.Append(buf, size); \
+        f.Snprintf(fmt, t, buf_size); \
         return f; \
     }
 
@@ -274,29 +287,29 @@ inline Hex2<IntType> HEX(IntType v)
 #define ARG_HEX2_FORMATTER(type, fmt, buf_size) \
     ARG_HEX_FORMATTER(Hex2Format, type, fmt, buf_size)
 
-ARG_HEX1_FORMATTER(char, "%hhx", 4);
-ARG_HEX1_FORMATTER(signed char, "%hhx", 4);
-ARG_HEX1_FORMATTER(unsigned char, "%hhx", 4);
-ARG_HEX1_FORMATTER(short, "%hx", 6);
-ARG_HEX1_FORMATTER(unsigned short, "%hx", 6);
-ARG_HEX1_FORMATTER(int, "%x", 10);
-ARG_HEX1_FORMATTER(unsigned int, "%x", 10);
-ARG_HEX1_FORMATTER(long, "%lx", 18);
-ARG_HEX1_FORMATTER(unsigned long, "%lx", 18);
-ARG_HEX1_FORMATTER(long long, "%llx", 18);
-ARG_HEX1_FORMATTER(unsigned long long, "%llx", 18);
+ARG_HEX1_FORMATTER(char, "%hhx", 2);
+ARG_HEX1_FORMATTER(signed char, "%hhx", 2);
+ARG_HEX1_FORMATTER(unsigned char, "%hhx", 2);
+ARG_HEX1_FORMATTER(short, "%hx", 4);
+ARG_HEX1_FORMATTER(unsigned short, "%hx", 4);
+ARG_HEX1_FORMATTER(int, "%x", 8);
+ARG_HEX1_FORMATTER(unsigned int, "%x", 8);
+ARG_HEX1_FORMATTER(long, "%lx", 16);
+ARG_HEX1_FORMATTER(unsigned long, "%lx", 16);
+ARG_HEX1_FORMATTER(long long, "%llx", 16);
+ARG_HEX1_FORMATTER(unsigned long long, "%llx", 16);
 
-ARG_HEX2_FORMATTER(char, "%hhX", 4);
-ARG_HEX2_FORMATTER(signed char, "%hhX", 4);
-ARG_HEX2_FORMATTER(unsigned char, "%hhX", 4);
-ARG_HEX2_FORMATTER(short, "%hX", 6);
-ARG_HEX2_FORMATTER(unsigned short, "%hX", 6);
-ARG_HEX2_FORMATTER(int, "%X", 10);
-ARG_HEX2_FORMATTER(unsigned int, "%X", 10);
-ARG_HEX2_FORMATTER(long, "%lX", 18);
-ARG_HEX2_FORMATTER(unsigned long, "%lX", 18);
-ARG_HEX2_FORMATTER(long long, "%llX", 18);
-ARG_HEX2_FORMATTER(unsigned long long, "%llX", 18);
+ARG_HEX2_FORMATTER(char, "%hhX", 2);
+ARG_HEX2_FORMATTER(signed char, "%hhX", 2);
+ARG_HEX2_FORMATTER(unsigned char, "%hhX", 2);
+ARG_HEX2_FORMATTER(short, "%hX", 4);
+ARG_HEX2_FORMATTER(unsigned short, "%hX", 4);
+ARG_HEX2_FORMATTER(int, "%X", 8);
+ARG_HEX2_FORMATTER(unsigned int, "%X", 8);
+ARG_HEX2_FORMATTER(long, "%lX", 16);
+ARG_HEX2_FORMATTER(unsigned long, "%lX", 16);
+ARG_HEX2_FORMATTER(long long, "%llX", 16);
+ARG_HEX2_FORMATTER(unsigned long long, "%llX", 16);
 
 template<typename IntType>
 inline ArgFormatter & operator << (ArgFormatter &f, const Hex1<IntType> &v)
@@ -638,7 +651,7 @@ public:
             std::lock_guard<std::mutex> l(mutex_);
             if (queue_.size() >= max_size_)
                 return false;
-            queue_.push(std::move(t));
+            queue_.push_back(std::move(t));
         }
 
         cond_var_.notify_one();
@@ -653,14 +666,21 @@ public:
             std::unique_lock<std::mutex> l(mutex_);
             cond_var_.wait(l, [this] () { return !queue_.empty(); });
             t = std::move(queue_.front());
-            queue_.pop();
+            queue_.pop_front();
         }
 
         return std::move(t);
     }
 
+    void Swap(std::deque<T> &queue)
+    {
+        std::unique_lock<std::mutex> l(mutex_);
+        cond_var_.wait(l, [this] () { return !queue_.empty(); });
+        queue.swap(queue_);
+    }
+
 private:
-    std::queue<T> queue_;
+    std::deque<T> queue_;
     std::mutex mutex_;
     std::condition_variable cond_var_;
     std::size_t max_size_;
@@ -724,14 +744,21 @@ private:
 
     void LogThreadFunc()
     {
+        std::deque<AsyncLogMessage> msg_queue;
+
         for (;;)
         {
-            auto msg = log_msg_queue_.Pop();
+            log_msg_queue_.Swap(msg_queue);
 
-            if (msg.msg_type == MessageType::Terminate)
-                break;
+            for (auto &msg : msg_queue)
+            {
+                if (msg.msg_type == MessageType::Terminate)
+                    return ;
 
-            rotate_log_sink_.Sink(msg.log_msg);
+                rotate_log_sink_.Sink(msg.log_msg);
+            }
+
+            msg_queue.clear();
         }
     }
 
