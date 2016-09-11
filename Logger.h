@@ -4,15 +4,17 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <string.h>
-#include <stdio.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
 
-#include <string>
-#include <vector>
 #include <deque>
-#include <thread>
 #include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include <chrono>
 #include <condition_variable>
 
 namespace slog
@@ -199,14 +201,14 @@ private:
         return f; \
     }
 
-ARG_FORMATTER(short, "%hd", 6)
-ARG_FORMATTER(unsigned short, "%hu", 5)
-ARG_FORMATTER(int, "%d", 11)
-ARG_FORMATTER(unsigned int, "%u", 10)
-ARG_FORMATTER(long, "%ld", 21)
-ARG_FORMATTER(unsigned long, "%ld", 20)
-ARG_FORMATTER(long long, "%lld", 21)
-ARG_FORMATTER(unsigned long long, "%llu", 20)
+ARG_FORMATTER(short, "%hd", 7)
+ARG_FORMATTER(unsigned short, "%hu", 6)
+ARG_FORMATTER(int, "%d", 12)
+ARG_FORMATTER(unsigned int, "%u", 11)
+ARG_FORMATTER(long, "%ld", 22)
+ARG_FORMATTER(unsigned long, "%ld", 21)
+ARG_FORMATTER(long long, "%lld", 22)
+ARG_FORMATTER(unsigned long long, "%llu", 21)
 
 inline ArgFormatter & operator << (ArgFormatter &f, char c)
 {
@@ -287,29 +289,29 @@ inline Hex2<IntType> HEX(IntType v)
 #define ARG_HEX2_FORMATTER(type, fmt, buf_size) \
     ARG_HEX_FORMATTER(Hex2Format, type, fmt, buf_size)
 
-ARG_HEX1_FORMATTER(char, "%hhx", 2);
-ARG_HEX1_FORMATTER(signed char, "%hhx", 2);
-ARG_HEX1_FORMATTER(unsigned char, "%hhx", 2);
-ARG_HEX1_FORMATTER(short, "%hx", 4);
-ARG_HEX1_FORMATTER(unsigned short, "%hx", 4);
-ARG_HEX1_FORMATTER(int, "%x", 8);
-ARG_HEX1_FORMATTER(unsigned int, "%x", 8);
-ARG_HEX1_FORMATTER(long, "%lx", 16);
-ARG_HEX1_FORMATTER(unsigned long, "%lx", 16);
-ARG_HEX1_FORMATTER(long long, "%llx", 16);
-ARG_HEX1_FORMATTER(unsigned long long, "%llx", 16);
+ARG_HEX1_FORMATTER(char, "%hhx", 3);
+ARG_HEX1_FORMATTER(signed char, "%hhx", 3);
+ARG_HEX1_FORMATTER(unsigned char, "%hhx", 3);
+ARG_HEX1_FORMATTER(short, "%hx", 5);
+ARG_HEX1_FORMATTER(unsigned short, "%hx", 5);
+ARG_HEX1_FORMATTER(int, "%x", 9);
+ARG_HEX1_FORMATTER(unsigned int, "%x", 9);
+ARG_HEX1_FORMATTER(long, "%lx", 17);
+ARG_HEX1_FORMATTER(unsigned long, "%lx", 17);
+ARG_HEX1_FORMATTER(long long, "%llx", 17);
+ARG_HEX1_FORMATTER(unsigned long long, "%llx", 17);
 
-ARG_HEX2_FORMATTER(char, "%hhX", 2);
-ARG_HEX2_FORMATTER(signed char, "%hhX", 2);
-ARG_HEX2_FORMATTER(unsigned char, "%hhX", 2);
-ARG_HEX2_FORMATTER(short, "%hX", 4);
-ARG_HEX2_FORMATTER(unsigned short, "%hX", 4);
-ARG_HEX2_FORMATTER(int, "%X", 8);
-ARG_HEX2_FORMATTER(unsigned int, "%X", 8);
-ARG_HEX2_FORMATTER(long, "%lX", 16);
-ARG_HEX2_FORMATTER(unsigned long, "%lX", 16);
-ARG_HEX2_FORMATTER(long long, "%llX", 16);
-ARG_HEX2_FORMATTER(unsigned long long, "%llX", 16);
+ARG_HEX2_FORMATTER(char, "%hhX", 3);
+ARG_HEX2_FORMATTER(signed char, "%hhX", 3);
+ARG_HEX2_FORMATTER(unsigned char, "%hhX", 3);
+ARG_HEX2_FORMATTER(short, "%hX", 5);
+ARG_HEX2_FORMATTER(unsigned short, "%hX", 5);
+ARG_HEX2_FORMATTER(int, "%X", 9);
+ARG_HEX2_FORMATTER(unsigned int, "%X", 9);
+ARG_HEX2_FORMATTER(long, "%lX", 17);
+ARG_HEX2_FORMATTER(unsigned long, "%lX", 17);
+ARG_HEX2_FORMATTER(long long, "%llX", 17);
+ARG_HEX2_FORMATTER(unsigned long long, "%llX", 17);
 
 template<typename IntType>
 inline ArgFormatter & operator << (ArgFormatter &f, const Hex1<IntType> &v)
@@ -509,6 +511,8 @@ class MessageLogger : public Logger
                            const ArgListBuf &arg_list_buf) override
     {
         LogMessage log_msg;
+        LogTimestamp(log_msg);
+
         auto put_char = [&] (int c) { log_msg.PutChar(c); };
         auto put_buffer = [&] (const char *buf, std::size_t size) {
             log_msg.PutBuffer(buf, size);
@@ -519,6 +523,41 @@ class MessageLogger : public Logger
     }
 
     virtual void Sink(LogMessage log_msg) = 0;
+
+    void LogTimestamp(LogMessage &log_msg)
+    {
+        auto now = std::chrono::system_clock::now();
+        auto time = std::chrono::system_clock::to_time_t(now);
+        auto microseconds = std::chrono::duration_cast<
+            std::chrono::microseconds>(now.time_since_epoch()).count();
+
+        microseconds %= 1000000;
+
+        if (time != time_)
+        {
+            localtime_r(&time, &tm_);
+            time_ = time;
+
+            snprintf(timestamp_buffer_, 21, "[%d-%02d-%02d %02d:%02d:%02d",
+                     tm_.tm_year + 1900, tm_.tm_mon + 1, tm_.tm_mday,
+                     tm_.tm_hour, tm_.tm_min, tm_.tm_sec);
+            timestamp_buffer_[20] = '.';
+        }
+
+        snprintf(timestamp_buffer_ + 21, 7, "%06u",
+                 static_cast<unsigned int>(microseconds));
+        timestamp_buffer_[27] = ']';
+        timestamp_buffer_[28] = ' ';
+
+        log_msg.PutBuffer(timestamp_buffer_, sizeof(timestamp_buffer_));
+    }
+
+    // Cache time and tm
+    time_t time_ = 0;
+    struct tm tm_;
+
+    // Timestamp format: [2016-09-11 17:00:00.000123]
+    char timestamp_buffer_[29];
 };
 
 class RotateLogSink final
