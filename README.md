@@ -3,6 +3,11 @@ Slog
 
 A simple log library written in C++ 11.
 
+Build
+-----
+
+    cmake . && make
+
 Platforms
 ---------
 
@@ -13,5 +18,5 @@ Features
 --------
 
 * Header Only
-* Self defined struct formatting
+* User define struct formatting
 * Rotating log files

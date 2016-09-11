@@ -11,6 +11,7 @@
 
 #include <deque>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -234,10 +235,31 @@ inline ArgFormatter & operator << (ArgFormatter &f, const char *s)
     return f;
 }
 
-inline ArgFormatter & operator << (ArgFormatter &f, std::string &s)
+inline ArgFormatter & operator << (ArgFormatter &f, const std::string &s)
 {
     f.Append(s.data(), s.size());
     return f;
+}
+
+inline ArgFormatter & operator << (ArgFormatter &f, float d)
+{
+    std::ostringstream oss;
+    oss << d;
+    return f << oss.str();
+}
+
+inline ArgFormatter & operator << (ArgFormatter &f, double d)
+{
+    std::ostringstream oss;
+    oss << d;
+    return f << oss.str();
+}
+
+inline ArgFormatter & operator << (ArgFormatter &f, long double d)
+{
+    std::ostringstream oss;
+    oss << d;
+    return f << oss.str();
 }
 
 template<typename IntType>
