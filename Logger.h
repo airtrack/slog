@@ -12,6 +12,7 @@
 
 #include <deque>
 #include <mutex>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -971,6 +972,12 @@ private:
     BoundedQueue<AsyncLogMessage> log_msg_queue_;
     std::thread log_thread_;
 };
+
+template<typename LoggerType, typename... Args>
+inline std::unique_ptr<Logger> CreateLogger(Args &&... args)
+{
+    return std::unique_ptr<Logger>(new LoggerType(std::forward<Args>(args)...));
+}
 
 } // namespace slog
 
