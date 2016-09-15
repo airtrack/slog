@@ -14,15 +14,18 @@ inline slog::ArgFormatter & operator << (slog::ArgFormatter &f, const Test &t)
 
 int main()
 {
-    slog::SyncLogger logger("test.log", 200 * 1024 * 1024, 1);
-
-    for (int i = 0; i < 1000000; ++i)
-        logger.Info("[slog] message #{} : This is some text for your pleasure", i);
+    slog::ConsoleLogger logger;
 
     Test t1{ 1, 2 };
     Test t2{ 3, 4 };
 
-    logger.Info("{}, {}", t1, t2);
+    logger.Info("{1} {0}", t1, t2);
+    logger.Info("{:20} {:20}", t1, t2);
+    logger.Info("{1:20} {0:20}", t1, t2);
+    logger.Info("{:>20} {:>20}", t1, t2);
+    logger.Info("{:<20} {:<20}", t1, t2);
+    logger.Info("{:^20} {:^20}", t1, t2);
+    logger.Info("{:^#20} {:^#20}", t1, t2);
 
     return 0;
 }

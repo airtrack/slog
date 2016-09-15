@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -407,7 +408,7 @@ public:
 protected:
     template<typename PutChar, typename PutBuffer>
     void Format(const char *format, const ArgListBuf &arg_list_buf,
-                PutChar &put_char, PutBuffer &put_buffer)
+                const PutChar &put_char, const PutBuffer &put_buffer)
     {
         auto p = format;
         std::size_t index = 0;
@@ -416,16 +417,8 @@ protected:
         {
             if (*p == '{')
             {
-                if (*(p + 1) == '}')
-                {
-                    auto arg = arg_list_buf[index];
-                    if (arg.buf)
-                        put_buffer(arg.buf, arg.Size());
-                    ++index;
-
-                    p += 2;
+                if (ParseFmt(p, index, arg_list_buf, put_char, put_buffer))
                     continue;
-                }
             }
 
             put_char(*p++);
@@ -435,6 +428,145 @@ protected:
     }
 
 private:
+    template<typename PutChar, typename PutBuffer>
+    bool ParseFmt(const char *&p, std::size_t &index,
+                  const ArgListBuf &arg_list_buf,
+                  const PutChar &put_char,
+                  const PutBuffer &put_buffer)
+    {
+        if (*(p + 1) == '}')
+        {
+            if (PutArg(p, p + 1, arg_list_buf, put_buffer, index))
+            {
+                ++index;
+                return true;
+            }
+        }
+        else if (*(p + 1) == ':')
+        {
+            if (ParseAlign(p, p + 1, arg_list_buf, put_char, put_buffer, index))
+            {
+                ++index;
+                return true;
+            }
+        }
+        else if (isdigit(*(p + 1)))
+        {
+            if (ParseArgIndex(p, p + 1, arg_list_buf, put_char, put_buffer))
+                return true;
+        }
+
+        return false;
+    }
+
+    template<typename PutBuffer>
+    bool PutArg(const char *&p, const char *e,
+                const ArgListBuf &arg_list_buf,
+                const PutBuffer &put_buffer,
+                std::size_t index)
+    {
+        auto arg = arg_list_buf[index];
+        if (arg.buf)
+            put_buffer(arg.buf, arg.Size());
+
+        p = e + 1;
+        return true;
+    }
+
+    template<typename PutChar, typename PutBuffer>
+    bool ParseAlign(const char *&p, const char *a,
+                    const ArgListBuf &arg_list_buf,
+                    const PutChar &put_char,
+                    const PutBuffer &put_buffer,
+                    std::size_t index)
+    {
+        a += 1;
+
+        const auto kLeft = 1;
+        const auto kRight = 2;
+        const auto kCenter = 3;
+
+        auto align = kRight;
+        switch (*a)
+        {
+        case '<': align = kLeft; ++a; break;
+        case '>': align = kRight; ++a; break;
+        case '^': align = kCenter; ++a; break;
+        }
+
+        auto pad = ' ';
+        if (!isdigit(*a) || *a == '0')
+        {
+            pad = *a;
+            ++a;
+        }
+
+        if (!isdigit(*a))
+            return false;
+
+        auto total_size = ParseNumber(a);
+
+        if (*a != '}')
+            return false;
+
+        auto size = 0u;
+        auto arg = arg_list_buf[index];
+        if (arg.buf)
+            size = arg.Size();
+
+        auto pad_size = size > total_size ? 0 : total_size - size;
+        auto left_pad_size = 0u;
+        auto right_pad_size = 0u;
+
+        switch (align)
+        {
+        case kLeft: right_pad_size = pad_size; break;
+        case kRight: left_pad_size = pad_size; break;
+        case kCenter:
+            left_pad_size = pad_size / 2;
+            right_pad_size = pad_size - left_pad_size;
+            break;
+        }
+
+        for (auto i = 0u; i < left_pad_size; ++i)
+            put_char(pad);
+
+        PutArg(p, a, arg_list_buf, put_buffer, index);
+
+        for (auto i = 0u; i < right_pad_size; ++i)
+            put_char(pad);
+        return true;
+    }
+
+    template<typename PutChar, typename PutBuffer>
+    bool ParseArgIndex(const char *&p, const char *d,
+                       const ArgListBuf &arg_list_buf,
+                       const PutChar &put_char,
+                       const PutBuffer &put_buffer)
+    {
+        auto index = ParseNumber(d);
+
+        if (*d == ':')
+            return ParseAlign(p, d, arg_list_buf, put_char, put_buffer, index);
+        else if (*d == '}')
+            return PutArg(p, d, arg_list_buf, put_buffer, index);
+
+        return false;
+    }
+
+    unsigned int ParseNumber(const char *&d)
+    {
+        auto num = 0u;
+
+        while (isdigit(*d))
+        {
+            num = num * 10 + *d - '0';
+            ++d;
+        }
+
+        return num;
+    }
+
     template<typename Arg, typename... Args>
     void FormatArgs(ArgListBuf &arg_list_buf,
                     const Arg &arg, const Args&... args)
