@@ -211,6 +211,7 @@ ARG_FORMATTER(long, "%ld", 22)
 ARG_FORMATTER(unsigned long, "%ld", 21)
 ARG_FORMATTER(long long, "%lld", 22)
 ARG_FORMATTER(unsigned long long, "%llu", 21)
+ARG_FORMATTER(void *, "%p", 19)
 
 inline ArgFormatter & operator << (ArgFormatter &f, char c)
 {
