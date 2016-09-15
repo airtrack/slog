@@ -16,3 +16,4 @@ set(EXECUTABLE_OUTPUT_PATH "${PROJECT_BINARY_DIR}/bin")
 set(LIBRARY_OUTPUT_PATH "${PROJECT_BINARY_DIR}/lib")
 
 add_executable(slog_test Test.cpp)
+add_executable(slog_bench Bench.cpp)
