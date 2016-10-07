@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 #include <chrono>
+#include <type_traits>
 #include <condition_variable>
 
 namespace slog
@@ -139,6 +140,61 @@ private:
     std::size_t arg_count_ = 0;
 };
 
+template<typename IntType>
+inline std::size_t GetDigitCount(IntType u)
+{
+    std::size_t digits = 0;
+    do
+    {
+        ++digits;
+        u /= 10;
+    } while (u);
+    return digits;
+}
+
+template<typename IntType>
+inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType u,
+                               std::true_type)
+{
+    width = std::max(GetDigitCount(u), width);
+
+    auto pos = width;
+
+    for (; u > 0; u /= 10)
+        buf[--pos] = u % 10 + '0';
+
+    // Pad '0'
+    while (pos > 0)
+        buf[--pos] = '0';
+
+    return width;
+}
+
+template<typename IntType>
+inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType i,
+                               std::false_type)
+{
+    std::size_t pos = 0;
+    typename std::make_unsigned<IntType>::type u = 0;
+
+    if (i >= 0)
+        u = i;
+    else
+    {
+        buf[pos++] = '-';
+        u = -i;
+    }
+
+    return pos + UnsafeToStr(buf + pos, width == 0 ? 0 : width - pos, u,
+                             std::true_type());
+}
+
+template<typename IntType>
+inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType i)
+{
+    return UnsafeToStr(buf, width, i, std::is_unsigned<IntType>());
+}
+
 class ArgFormatter final
 {
 public:
@@ -177,6 +233,13 @@ public:
         ConsumeBuf(size);
     }
 
+    template<typename T>
+    void ToStr(T t, std::size_t reserve)
+    {
+        ReserveBuf(reserve);
+        ConsumeBuf(UnsafeToStr(Current(), 0, t));
+    }
+
 private:
     void ReserveBuf(std::size_t size)
     {
@@ -204,14 +267,21 @@ private:
         return f; \
     }
 
-ARG_FORMATTER(short, "%hd", 7)
-ARG_FORMATTER(unsigned short, "%hu", 6)
-ARG_FORMATTER(int, "%d", 12)
-ARG_FORMATTER(unsigned int, "%u", 11)
-ARG_FORMATTER(long, "%ld", 22)
-ARG_FORMATTER(unsigned long, "%ld", 21)
-ARG_FORMATTER(long long, "%lld", 22)
-ARG_FORMATTER(unsigned long long, "%llu", 21)
+#define ARG_FORMATTER_TO_STR(type, buf_size) \
+    inline ArgFormatter & operator << (ArgFormatter &f, type t) \
+    { \
+        f.ToStr(t, buf_size); \
+        return f; \
+    }
+
+ARG_FORMATTER_TO_STR(short, 6)
+ARG_FORMATTER_TO_STR(unsigned short, 5)
+ARG_FORMATTER_TO_STR(int, 11)
+ARG_FORMATTER_TO_STR(unsigned int, 10)
+ARG_FORMATTER_TO_STR(long, 20)
+ARG_FORMATTER_TO_STR(unsigned long, 20)
+ARG_FORMATTER_TO_STR(long long, 20)
+ARG_FORMATTER_TO_STR(unsigned long long, 20)
 ARG_FORMATTER(void *, "%p", 19)
 
 inline ArgFormatter & operator << (ArgFormatter &f, char c)
@@ -700,8 +770,8 @@ class MessageLogger : public Logger
             timestamp_buffer_[20] = '.';
         }
 
-        snprintf(timestamp_buffer_ + 21, 7, "%06u",
-                 static_cast<unsigned int>(microseconds));
+        UnsafeToStr(timestamp_buffer_ + 21, 6,
+                    static_cast<unsigned int>(microseconds));
         timestamp_buffer_[27] = ']';
         timestamp_buffer_[28] = ' ';
 
