@@ -141,27 +141,27 @@ private:
 };
 
 template<typename IntType>
-inline std::size_t GetDigitCount(IntType u)
+inline std::size_t GetDigitCount(IntType u, std::size_t base)
 {
     std::size_t digits = 0;
     do
     {
         ++digits;
-        u /= 10;
+        u /= base;
     } while (u);
     return digits;
 }
 
 template<typename IntType>
 inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType u,
-                               std::true_type)
+                               std::size_t base, const char *table)
 {
-    width = std::max(GetDigitCount(u), width);
+    width = std::max(GetDigitCount(u, base), width);
 
     auto pos = width;
 
-    for (; u > 0; u /= 10)
-        buf[--pos] = u % 10 + '0';
+    for (; u > 0; u /= base)
+        buf[--pos] = table[u % base];
 
     // Pad '0'
     while (pos > 0)
@@ -171,8 +171,34 @@ inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType u,
 }
 
 template<typename IntType>
-inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType i,
-                               std::false_type)
+inline std::size_t UnsafeToHex(char *buf, std::size_t width, IntType u)
+{
+    const char *table = "0123456789abcdef";
+    return UnsafeToStr(buf, width,
+                       typename std::make_unsigned<IntType>::type(u),
+                       16, table);
+}
+
+template<typename IntType>
+inline std::size_t UnsafeToHEX(char *buf, std::size_t width, IntType u)
+{
+    const char *table = "0123456789ABCDEF";
+    return UnsafeToStr(buf, width,
+                       typename std::make_unsigned<IntType>::type(u),
+                       16, table);
+}
+
+template<typename IntType>
+inline std::size_t UnsafeToDecimal(char *buf, std::size_t width, IntType u,
+                                   std::true_type)
+{
+    const char *table = "0123456789";
+    return UnsafeToStr(buf, width, u, 10, table);
+}
+
+template<typename IntType>
+inline std::size_t UnsafeToDecimal(char *buf, std::size_t width, IntType i,
+                                   std::false_type)
 {
     std::size_t pos = 0;
     typename std::make_unsigned<IntType>::type u = 0;
@@ -185,14 +211,14 @@ inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType i,
         u = -i;
     }
 
-    return pos + UnsafeToStr(buf + pos, width == 0 ? 0 : width - pos, u,
-                             std::true_type());
+    return pos + UnsafeToDecimal(buf + pos, width == 0 ? 0 : width - pos, u,
+                                 std::true_type());
 }
 
 template<typename IntType>
-inline std::size_t UnsafeToStr(char *buf, std::size_t width, IntType i)
+inline std::size_t UnsafeToDecimal(char *buf, std::size_t width, IntType i)
 {
-    return UnsafeToStr(buf, width, i, std::is_unsigned<IntType>());
+    return UnsafeToDecimal(buf, width, i, std::is_unsigned<IntType>());
 }
 
 class ArgFormatter final
@@ -226,18 +252,24 @@ public:
     }
 
     template<typename T>
-    void Snprintf(const char *fmt, T t, std::size_t reserve)
+    void ToDecimal(T t, std::size_t reserve)
     {
         ReserveBuf(reserve);
-        auto size = snprintf(Current(), reserve, fmt, t);
-        ConsumeBuf(size);
+        ConsumeBuf(UnsafeToDecimal(Current(), 0, t));
     }
 
     template<typename T>
-    void ToStr(T t, std::size_t reserve)
+    void ToHex(T t, std::size_t reserve)
     {
         ReserveBuf(reserve);
-        ConsumeBuf(UnsafeToStr(Current(), 0, t));
+        ConsumeBuf(UnsafeToHex(Current(), 0, t));
+    }
+
+    template<typename T>
+    void ToHEX(T t, std::size_t reserve)
+    {
+        ReserveBuf(reserve);
+        ConsumeBuf(UnsafeToHEX(Current(), 0, t));
     }
 
 private:
@@ -260,29 +292,21 @@ private:
     std::size_t arg_data_size_ = 0;
 };
 
-#define ARG_FORMATTER(type, fmt, buf_size) \
+#define ARG_FORMATTER_TO_DECIMAL(type, buf_size) \
     inline ArgFormatter & operator << (ArgFormatter &f, type t) \
     { \
-        f.Snprintf(fmt, t, buf_size); \
+        f.ToDecimal(t, buf_size); \
         return f; \
     }
 
-#define ARG_FORMATTER_TO_STR(type, buf_size) \
-    inline ArgFormatter & operator << (ArgFormatter &f, type t) \
-    { \
-        f.ToStr(t, buf_size); \
-        return f; \
-    }
-
-ARG_FORMATTER_TO_STR(short, 6)
-ARG_FORMATTER_TO_STR(unsigned short, 5)
-ARG_FORMATTER_TO_STR(int, 11)
-ARG_FORMATTER_TO_STR(unsigned int, 10)
-ARG_FORMATTER_TO_STR(long, 20)
-ARG_FORMATTER_TO_STR(unsigned long, 20)
-ARG_FORMATTER_TO_STR(long long, 20)
-ARG_FORMATTER_TO_STR(unsigned long long, 20)
-ARG_FORMATTER(void *, "%p", 19)
+ARG_FORMATTER_TO_DECIMAL(short, 6)
+ARG_FORMATTER_TO_DECIMAL(unsigned short, 5)
+ARG_FORMATTER_TO_DECIMAL(int, 11)
+ARG_FORMATTER_TO_DECIMAL(unsigned int, 10)
+ARG_FORMATTER_TO_DECIMAL(long, 20)
+ARG_FORMATTER_TO_DECIMAL(unsigned long, 20)
+ARG_FORMATTER_TO_DECIMAL(long long, 20)
+ARG_FORMATTER_TO_DECIMAL(unsigned long long, 20)
 
 inline ArgFormatter & operator << (ArgFormatter &f, char c)
 {
@@ -311,6 +335,13 @@ inline ArgFormatter & operator << (ArgFormatter &f, const char *s)
 inline ArgFormatter & operator << (ArgFormatter &f, const std::string &s)
 {
     f.Append(s.data(), s.size());
+    return f;
+}
+
+inline ArgFormatter & operator << (ArgFormatter &f, void *p)
+{
+    f.Append("0x", 2);
+    f.ToHex(reinterpret_cast<uintptr_t>(p), sizeof(p) * 2);
     return f;
 }
 
@@ -371,42 +402,42 @@ inline Hex2<IntType> HEX(IntType v)
     return Hex2<IntType>(v);
 }
 
-#define ARG_HEX_FORMATTER(func_name, type, fmt, buf_size) \
+#define ARG_HEX_FORMATTER(func_name, type, fmt_func, buf_size) \
     inline ArgFormatter & func_name(ArgFormatter &f, type t) \
     { \
-        f.Snprintf(fmt, t, buf_size); \
+        f.fmt_func(t, buf_size); \
         return f; \
     }
 
-#define ARG_HEX1_FORMATTER(type, fmt, buf_size) \
-    ARG_HEX_FORMATTER(Hex1Format, type, fmt, buf_size)
+#define ARG_HEX1_FORMATTER(type, buf_size) \
+    ARG_HEX_FORMATTER(Hex1Format, type, ToHex, buf_size)
 
-#define ARG_HEX2_FORMATTER(type, fmt, buf_size) \
-    ARG_HEX_FORMATTER(Hex2Format, type, fmt, buf_size)
+#define ARG_HEX2_FORMATTER(type, buf_size) \
+    ARG_HEX_FORMATTER(Hex2Format, type, ToHEX, buf_size)
 
-ARG_HEX1_FORMATTER(char, "%hhx", 3);
-ARG_HEX1_FORMATTER(signed char, "%hhx", 3);
-ARG_HEX1_FORMATTER(unsigned char, "%hhx", 3);
-ARG_HEX1_FORMATTER(short, "%hx", 5);
-ARG_HEX1_FORMATTER(unsigned short, "%hx", 5);
-ARG_HEX1_FORMATTER(int, "%x", 9);
-ARG_HEX1_FORMATTER(unsigned int, "%x", 9);
-ARG_HEX1_FORMATTER(long, "%lx", 17);
-ARG_HEX1_FORMATTER(unsigned long, "%lx", 17);
-ARG_HEX1_FORMATTER(long long, "%llx", 17);
-ARG_HEX1_FORMATTER(unsigned long long, "%llx", 17);
+ARG_HEX1_FORMATTER(char, 2);
+ARG_HEX1_FORMATTER(signed char, 2);
+ARG_HEX1_FORMATTER(unsigned char, 2);
+ARG_HEX1_FORMATTER(short, 4);
+ARG_HEX1_FORMATTER(unsigned short, 4);
+ARG_HEX1_FORMATTER(int, 8);
+ARG_HEX1_FORMATTER(unsigned int, 8);
+ARG_HEX1_FORMATTER(long, 16);
+ARG_HEX1_FORMATTER(unsigned long, 16);
+ARG_HEX1_FORMATTER(long long, 16);
+ARG_HEX1_FORMATTER(unsigned long long, 16);
 
-ARG_HEX2_FORMATTER(char, "%hhX", 3);
-ARG_HEX2_FORMATTER(signed char, "%hhX", 3);
-ARG_HEX2_FORMATTER(unsigned char, "%hhX", 3);
-ARG_HEX2_FORMATTER(short, "%hX", 5);
-ARG_HEX2_FORMATTER(unsigned short, "%hX", 5);
-ARG_HEX2_FORMATTER(int, "%X", 9);
-ARG_HEX2_FORMATTER(unsigned int, "%X", 9);
-ARG_HEX2_FORMATTER(long, "%lX", 17);
-ARG_HEX2_FORMATTER(unsigned long, "%lX", 17);
-ARG_HEX2_FORMATTER(long long, "%llX", 17);
-ARG_HEX2_FORMATTER(unsigned long long, "%llX", 17);
+ARG_HEX2_FORMATTER(char, 2);
+ARG_HEX2_FORMATTER(signed char, 2);
+ARG_HEX2_FORMATTER(unsigned char, 2);
+ARG_HEX2_FORMATTER(short, 4);
+ARG_HEX2_FORMATTER(unsigned short, 4);
+ARG_HEX2_FORMATTER(int, 8);
+ARG_HEX2_FORMATTER(unsigned int, 8);
+ARG_HEX2_FORMATTER(long, 16);
+ARG_HEX2_FORMATTER(unsigned long, 16);
+ARG_HEX2_FORMATTER(long long, 16);
+ARG_HEX2_FORMATTER(unsigned long long, 16);
 
 template<typename IntType>
 inline ArgFormatter & operator << (ArgFormatter &f, const Hex1<IntType> &v)
@@ -770,8 +801,8 @@ class MessageLogger : public Logger
             timestamp_buffer_[20] = '.';
         }
 
-        UnsafeToStr(timestamp_buffer_ + 21, 6,
-                    static_cast<unsigned int>(microseconds));
+        UnsafeToDecimal(timestamp_buffer_ + 21, 6,
+                        static_cast<unsigned int>(microseconds));
         timestamp_buffer_[27] = ']';
         timestamp_buffer_[28] = ' ';
 

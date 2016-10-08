@@ -26,6 +26,7 @@ int main()
     logger->Info("{:<20} {:<20}", t1, t2);
     logger->Info("{:^20} {:^20}", t1, t2);
     logger->Info("{:^#20} {:^#20}", t1, t2);
+    logger->Info("{} {}", &t1, &t2);
 
     return 0;
 }
