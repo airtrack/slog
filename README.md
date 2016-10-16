@@ -18,13 +18,14 @@ Features
 --------
 
 * Header Only
+* Fast
 * User define struct formatting
 * Rotating log files
 
 Formatting
 ----------
 
-`{}` is a placeholder for a argument, the number in the placeholder is the index of argument, e.g. `{0}` is a placeholder for the first argument.
+`{}` is a placeholder for an argument, the number in the placeholder is the index of argument, e.g. `{0}` is a placeholder for the first argument.
 
 ###Alignment
 

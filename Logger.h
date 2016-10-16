@@ -2,14 +2,15 @@
 #define LOGGER_H
 
 #include <sys/stat.h>
-#include <unistd.h>
 
+#include <assert.h>
 #include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <memory>
@@ -929,57 +930,109 @@ private:
     RotateLogSink rotate_log_sink_;
 };
 
+// Implementation of Dmitry Vyukov's MPMC algorithm
+// http://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
 template<typename T>
-class BoundedQueue final
+class MPMCBoundedQueue final
 {
 public:
-    explicit BoundedQueue(std::size_t max_size)
-        : max_size_(max_size)
+    explicit MPMCBoundedQueue(std::size_t buffer_size)
+        : buffer_(new Cell[buffer_size]),
+          buffer_mask_(buffer_size - 1)
     {
+        assert((buffer_size >= 2) &&
+               ((buffer_size & (buffer_size - 1)) == 0));
+
+        for (std::size_t i = 0; i < buffer_size; ++i)
+            buffer_[i].sequence.store(i, std::memory_order_relaxed);
+
+        enqueue_pos_.store(0, std::memory_order_relaxed);
+        dequeue_pos_.store(0, std::memory_order_relaxed);
     }
 
-    BoundedQueue(const BoundedQueue &) = delete;
-    void operator = (const BoundedQueue &) = delete;
+    MPMCBoundedQueue(const MPMCBoundedQueue &) = delete;
+    void operator = (const MPMCBoundedQueue &) = delete;
 
-    bool Push(T &&t)
+    ~MPMCBoundedQueue()
     {
+        delete [] buffer_;
+    }
+
+    bool Enqueue(T &&data)
+    {
+        Cell *cell = nullptr;
+        auto pos = enqueue_pos_.load(std::memory_order_relaxed);
+
+        for (;;)
         {
-            std::lock_guard<std::mutex> l(mutex_);
-            if (queue_.size() >= max_size_)
+            cell = &buffer_[pos & buffer_mask_];
+            auto seq = cell->sequence.load(std::memory_order_acquire);
+            auto diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+
+            if (diff == 0)
+            {
+                if (enqueue_pos_.compare_exchange_weak(
+                        pos, pos + 1, std::memory_order_relaxed))
+                    break;
+            }
+            else if (diff < 0)
                 return false;
-            queue_.push_back(std::move(t));
+            else
+                pos = enqueue_pos_.load(std::memory_order_relaxed);
         }
 
-        cond_var_.notify_one();
+        cell->data = std::move(data);
+        cell->sequence.store(pos + 1, std::memory_order_release);
         return true;
     }
 
-    T Pop()
+    bool Dequeue(T &data)
     {
-        T t;
+        Cell *cell = nullptr;
+        auto pos = dequeue_pos_.load(std::memory_order_relaxed);
 
+        for (;;)
         {
-            std::unique_lock<std::mutex> l(mutex_);
-            cond_var_.wait(l, [this] () { return !queue_.empty(); });
-            t = std::move(queue_.front());
-            queue_.pop_front();
+            cell = &buffer_[pos & buffer_mask_];
+            auto seq = cell->sequence.load(std::memory_order_acquire);
+            auto diff = static_cast<intptr_t>(seq) -
+                static_cast<intptr_t>(pos + 1);
+
+            if (diff == 0)
+            {
+                if (dequeue_pos_.compare_exchange_weak(
+                        pos, pos + 1, std::memory_order_relaxed))
+                    break;
+            }
+            else if (diff < 0)
+                return false;
+            else
+                pos = dequeue_pos_.load(std::memory_order_relaxed);
         }
 
-        return std::move(t);
-    }
-
-    void Swap(std::deque<T> &queue)
-    {
-        std::unique_lock<std::mutex> l(mutex_);
-        cond_var_.wait(l, [this] () { return !queue_.empty(); });
-        queue.swap(queue_);
+        data = std::move(cell->data);
+        cell->sequence.store(pos + buffer_mask_ + 1, std::memory_order_release);
+        return true;
     }
 
 private:
-    std::deque<T> queue_;
-    std::mutex mutex_;
-    std::condition_variable cond_var_;
-    std::size_t max_size_;
+    struct Cell final
+    {
+        std::atomic<std::size_t> sequence;
+        T data;
+    };
+
+    static const std::size_t kCachelineSize = 64;
+    typedef char CachelinePad[kCachelineSize];
+
+    CachelinePad pad0_;
+    Cell *const buffer_;
+    const std::size_t buffer_mask_;
+    CachelinePad pad1_;
+    std::atomic<std::size_t> enqueue_pos_;
+    CachelinePad pad2_;
+    std::atomic<std::size_t> dequeue_pos_;
+    CachelinePad pad3_;
 };
 
 class AsyncLogger final : public MessageLogger
@@ -1040,28 +1093,58 @@ private:
 
     void LogThreadFunc()
     {
-        std::deque<AsyncLogMessage> msg_queue;
+        AsyncLogMessage msg;
 
         for (;;)
         {
-            log_msg_queue_.Swap(msg_queue);
-
-            for (auto &msg : msg_queue)
+            if (!log_msg_queue_.Dequeue(msg))
             {
-                if (msg.msg_type == MessageType::Terminate)
-                    return ;
+                auto last_op_time = std::chrono::steady_clock::now();
 
-                rotate_log_sink_.Sink(msg.log_msg);
+                do
+                {
+                    SleepOrYield(last_op_time);
+                } while (!log_msg_queue_.Dequeue(msg));
             }
 
-            msg_queue.clear();
+            if (msg.msg_type == MessageType::Terminate)
+                break;
+
+            rotate_log_sink_.Sink(msg.log_msg);
         }
     }
 
     void PushAsyncMsg(AsyncLogMessage async_log_msg)
     {
-        while (!log_msg_queue_.Push(std::move(async_log_msg)))
-            usleep(100);
+        if (!log_msg_queue_.Enqueue(std::move(async_log_msg)))
+        {
+            auto last_op_time = std::chrono::steady_clock::now();
+
+            do
+            {
+                SleepOrYield(last_op_time);
+            } while (!log_msg_queue_.Enqueue(std::move(async_log_msg)));
+        }
+    }
+
+    void SleepOrYield(const std::chrono::steady_clock::time_point &last_op_time)
+    {
+        using std::chrono::microseconds;
+        using std::chrono::milliseconds;
+
+        auto now = std::chrono::steady_clock::now();
+        auto time_since_op = now - last_op_time;
+
+        if (time_since_op <= microseconds(50))
+            return ;
+
+        if (time_since_op <= microseconds(100))
+            return std::this_thread::yield();
+
+        if (time_since_op <= milliseconds(200))
+            return std::this_thread::sleep_for(milliseconds(20));
+
+        std::this_thread::sleep_for(milliseconds(100));
     }
 
     virtual void Sink(LogMessage log_msg) override
@@ -1070,7 +1153,7 @@ private:
     }
 
     RotateLogSink rotate_log_sink_;
-    BoundedQueue<AsyncLogMessage> log_msg_queue_;
+    MPMCBoundedQueue<AsyncLogMessage> log_msg_queue_;
     std::thread log_thread_;
 };
 
